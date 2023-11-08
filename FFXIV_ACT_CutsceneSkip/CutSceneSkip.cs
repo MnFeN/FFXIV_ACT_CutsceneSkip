@@ -1,18 +1,18 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Windows.Forms;
 using Advanced_Combat_Tracker;
 using System.Runtime.InteropServices;
-using System.Text;
 using System.IO;
 using System.Threading.Tasks;
+using System.Text.RegularExpressions;
 
 namespace FFXIV_ACT_CutsceneSkip
 {
 	public class CutsceneSkip : IActPluginV1
-    {
+	{
 		[DllImport("kernel32.dll", SetLastError = true)]
 		static extern bool ReadProcessMemory(
 			IntPtr hProcess,
@@ -52,8 +52,6 @@ namespace FFXIV_ACT_CutsceneSkip
 		Timer updateTimer = null;
 
 		CheckBox toggleAlwaysEnable;
-		Label lableAlwayEnable;
-
 
 		bool SyncConfig(bool write = false)
 		{
@@ -84,21 +82,18 @@ namespace FFXIV_ACT_CutsceneSkip
 			screenSpace = pluginScreenSpace;
 			statusLabel = pluginStatusText;
 			pluginScreenSpace.Text = "辍学";
-			toggleAlwaysEnable = new CheckBox();
-			toggleAlwaysEnable.Location = new System.Drawing.Point(10, 10);
-			toggleAlwaysEnable.Name = "toggleAlwaysEnable";
-			toggleAlwaysEnable.Size = new System.Drawing.Size(20, 20);
-			toggleAlwaysEnable.Checked = SyncConfig();
-			toggleAlwaysEnable.CheckedChanged += EnableAlwaysActive;
 
-			lableAlwayEnable = new Label();
-			lableAlwayEnable.Location = new System.Drawing.Point(30, 12);
-			lableAlwayEnable.Name = "lableAlwayEnable";
-			lableAlwayEnable.Text = "保持开启状态";
-			lableAlwayEnable.Size = new System.Drawing.Size(64, 20);
+            toggleAlwaysEnable = new CheckBox
+            {
+                Location = new System.Drawing.Point(20, 20),
+                Name = "toggleAlwaysEnable",
+				Text = "所有地图均启用",
+				Checked = SyncConfig(),
+				AutoSize = true,
+            };
+            toggleAlwaysEnable.CheckedChanged += EnableAlwaysActive;
 
 			screenSpace.Controls.Add(toggleAlwaysEnable);
-			screenSpace.Controls.Add(lableAlwayEnable);
 
 			process = null;
 			Init();
@@ -116,7 +111,7 @@ namespace FFXIV_ACT_CutsceneSkip
 				while (process == null)
 				{
 					process = Process.GetProcessesByName("ffxiv_dx11").FirstOrDefault();
-					statusLabel.Text = "FFXIV(dx11 only) not found.";
+					statusLabel.Text = "FFXIV (dx11 only) not found.";
 					System.Threading.Thread.Sleep(1000);
 				}
 			}).ContinueWith((t) =>
@@ -133,7 +128,7 @@ namespace FFXIV_ACT_CutsceneSkip
 					baseAddress = new IntPtr(match + process.MainModule.BaseAddress.ToInt64());
 					if (!WriteProcessMemory(process.Handle, baseAddress, new byte[] { 0x2e }, 1, IntPtr.Zero))
 						throw new Exception("WriteProcessMemory failed.");
-					statusLabel.Text = "Working pid="+ process.Id;
+					statusLabel.Text = "Working pid=" + process.Id;
 					ActGlobals.oFormActMain.OnLogLineRead += this.oFormActMain_OnLogLineRead;
 				}
 				catch (Exception e)
@@ -161,66 +156,72 @@ namespace FFXIV_ACT_CutsceneSkip
 		{
 			if (updateTimer != null && updateTimer.Enabled)
 				updateTimer.Stop();
-			if (process !=null && baseAddress!=IntPtr.Zero)
-            {
+			if (process != null && baseAddress != IntPtr.Zero)
+			{
 				WriteProcessMemory(process.Handle, baseAddress, new byte[] { 0x04 }, 1, IntPtr.Zero);
 				statusLabel.Text = "Exit :|";
-            } else
+			} else
 				//statusLabel.Text = "Error :(";
-			ActGlobals.oFormActMain.OnLogLineRead -= this.oFormActMain_OnLogLineRead;
+				ActGlobals.oFormActMain.OnLogLineRead -= this.oFormActMain_OnLogLineRead;
 			SyncConfig(toggleAlwaysEnable.Checked);
 		}
 
 		void SetActive(bool bActive)
-        {
-			if(statusLabel.Text.Contains("Working :D"))
-            {
+		{
+			if (statusLabel.Text.Contains("Working :D"))
+			{
 				try
 				{
 					WriteProcessMemory(process.Handle, baseAddress, new byte[] { (byte)(bActive ? 0x2e : 0x04) }, 1, IntPtr.Zero);
+					statusLabel.Text = bActive ? "Working :D enabled" : "Working :D disabled";
 				}
 				catch { }
-            }
-        }
+			}
+		}
 
 		void EnableAlwaysActive(object sender, EventArgs e)
 		{
-			if(toggleAlwaysEnable.Checked)
+			if (toggleAlwaysEnable.Checked)
 				SetActive(true);
 		}
 
+		List<string> enabledZoneIDs = new List<string> { 
+			"413", // 神兵要塞帝国南方堡
+			"414", // 最终决战天幕魔导城
+			"418", // 究极神兵破坏作战
+			/*
+			"1A7", // 海雾村部队工房
+			"1A8", // 高脚孤丘部队工房
+			"1A9", // 薰衣草苗圃部队工房
+			"28D", // 白银乡部队工房
+			"3D8", // 穹顶皓天部队工房
+			*/
+		};
+
+		Regex regex01 = new Regex("^Territory 01:(?<zoneID>[^:]+):");
 		public void oFormActMain_OnLogLineRead(bool isImport, LogLineEventArgs logInfo)
 		{
-			
-			//MessageBox.Show("on log linke");
-			if (statusLabel != null)
-            {
-				try
-                {
-					//ActPluginData actPluginData = ActGlobals.oFormActMain.PluginGetSelfData(this);
-					//var filePath = actPluginData.pluginFile.DirectoryName;
-					//filePath = filePath + "\\loglines.cfg";
-					//using (StreamWriter sw = new StreamWriter(filePath, true))
-					//{
-						//sw.WriteLine(logInfo.originalLogLine);
-						if (logInfo.originalLogLine.Contains("Territory"))
-						{
-							if (toggleAlwaysEnable.Checked || logInfo.originalLogLine.Contains("Territory 01:413:") || logInfo.originalLogLine.Contains("Territory 01:414:") || logInfo.originalLogLine.Contains("Territory 01:418:"))
-							{
-								SetActive(true);
-								statusLabel.Text = "Working :D enabled";
-							}
-							else
-							{
-								SetActive(false);
-								statusLabel.Text = "Working :D disabled";
-							}
-						}
-					//}
-				} catch
-                {
-					statusLabel.Text = "Error :(";
+			if (statusLabel == null) { return; }
+
+			try
+			{
+				if (toggleAlwaysEnable.Checked) 
+				{
+					SetActive(true);
 				}
+				else
+				{
+					string log = logInfo.originalLogLine.Substring(15); // [hh:mm:ss.xxx]
+					if (log.StartsWith("Territory"))
+					{
+						string zoneID = regex01.Match(log).Groups["zoneID"].Value;
+						SetActive(enabledZoneIDs.Contains(zoneID));
+					}
+				}
+			}
+			catch (Exception ex)
+			{
+				statusLabel.Text = "Error :(\n" + ex.Message;
 			}
 		}
 
